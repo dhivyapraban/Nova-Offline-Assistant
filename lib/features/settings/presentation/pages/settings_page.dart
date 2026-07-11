@@ -142,7 +142,7 @@ class _SettingsPageState extends ConsumerState<SettingsPage> {
               Consumer(builder: (context, ref, _) {
                 final aiState = ref.watch(aiEngineControllerProvider);
                 final statusColor = switch (aiState.status) {
-                  AIEngineStatus.ready when aiState.isLLMActive => const Color(0xFF00FF88),
+                  AIEngineStatus.ready when aiState.isLLMActive => theme.colorScheme.primary,
                   AIEngineStatus.loading => Colors.orange,
                   AIEngineStatus.error => Colors.red,
                   _ => Colors.grey,

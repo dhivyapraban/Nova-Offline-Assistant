@@ -6,6 +6,7 @@ import 'app.dart';
 import 'core/services/database_service.dart';
 import 'core/services/notification_service.dart';
 import 'features/assistant/presentation/controllers/conversation_controller.dart';
+import 'core/services/tts_service.dart';
 import 'core/router/app_router.dart';
 
 void main() async {
@@ -33,6 +34,7 @@ void main() async {
   // Initialize core services
   await DatabaseService.instance.database;
   await NotificationService.instance.initialize();
+  await TtsService.instance.init();
 
   runApp(
     const ProviderScope(

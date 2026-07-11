@@ -210,56 +210,7 @@ class MainActivity : FlutterActivity() {
                         }
                     }
                 }
-                "openStopwatch" -> {
-                    try {
-                        val intent = Intent("android.intent.action.SHOW_STOPWATCH").apply {
-                            flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                        }
-                        startActivity(intent)
-                        result.success(null)
-                    } catch (e: Exception) {
-                        try {
-                            val intent = Intent("com.android.deskclock.action.STOPWATCH").apply {
-                                flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                            }
-                            startActivity(intent)
-                            result.success(null)
-                        } catch (ex: Exception) {
-                            try {
-                                val intent = Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS).apply {
-                                    flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                }
-                                startActivity(intent)
-                                result.success(null)
-                            } catch (ex2: Exception) {
-                                try {
-                                    val clockKeywords = listOf("clock", "alarmclock", "deskclock")
-                                    var launched = false
-                                    val packages = packageManager.getInstalledPackages(0)
-                                    for (pkg in packages) {
-                                        val pkgName = pkg.packageName.lowercase()
-                                        if (clockKeywords.any { pkgName.contains(it) } && !pkgName.contains("widget")) {
-                                            val launchIntent = packageManager.getLaunchIntentForPackage(pkg.packageName)
-                                            if (launchIntent != null) {
-                                                launchIntent.flags = Intent.FLAG_ACTIVITY_NEW_TASK
-                                                startActivity(launchIntent)
-                                                launched = true
-                                                break
-                                            }
-                                        }
-                                    }
-                                    if (launched) {
-                                        result.success(null)
-                                    } else {
-                                        result.error("UNAVAILABLE", "Cannot find Clock app", null)
-                                    }
-                                } catch (ex3: Exception) {
-                                    result.error("UNAVAILABLE", "Cannot open stopwatch: ${ex3.message}", null)
-                                }
-                            }
-                        }
-                    }
-                }
+
                 "openAlarm" -> {
                     try {
                         val hour = (call.argument<Any>("hour") as? Number)?.toInt() ?: 8
@@ -589,6 +540,24 @@ class MainActivity : FlutterActivity() {
                         result.success(null)
                     } catch (e: Exception) {
                         result.error("UNAVAILABLE", "Cannot stop wake word service: ${e.message}", null)
+                    }
+                }
+                "pauseWakeWordListener" -> {
+                    try {
+                        val intent = Intent("com.nova.nova_assistant.PAUSE_LISTENING")
+                        sendBroadcast(intent)
+                        result.success(null)
+                    } catch (e: Exception) {
+                        result.error("UNAVAILABLE", "Cannot pause listener: ${e.message}", null)
+                    }
+                }
+                "resumeWakeWordListener" -> {
+                    try {
+                        val intent = Intent("com.nova.nova_assistant.RESUME_LISTENING")
+                        sendBroadcast(intent)
+                        result.success(null)
+                    } catch (e: Exception) {
+                        result.error("UNAVAILABLE", "Cannot resume listener: ${e.message}", null)
                     }
                 }
                 "checkPendingVoiceTrigger" -> {

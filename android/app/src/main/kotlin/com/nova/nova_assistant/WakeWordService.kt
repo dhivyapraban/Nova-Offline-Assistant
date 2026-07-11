@@ -43,6 +43,7 @@ class WakeWordService : Service() {
     private var speechRecognizer: SpeechRecognizer? = null
     private var recognizerIntent: Intent? = null
     private var isListening = false
+    private var isMuted = false
 
     // Overlay components
     private var windowManager: WindowManager? = null
@@ -57,6 +58,31 @@ class WakeWordService : Service() {
     }
     private var serviceState = ServiceState.IDLE_WAITING
 
+    private val commandReceiver = object : android.content.BroadcastReceiver() {
+        override fun onReceive(context: Context?, intent: Intent?) {
+            when (intent?.action) {
+                "com.nova.nova_assistant.PAUSE_LISTENING" -> {
+                    Log.d(TAG, "Broadcast received: PAUSE_LISTENING")
+                    serviceState = ServiceState.COMMAND_WAITING
+                    mainHandler.removeCallbacks(commandTimeoutRunnable)
+                    try {
+                        speechRecognizer?.setRecognitionListener(null)
+                        speechRecognizer?.cancel()
+                        speechRecognizer?.destroy()
+                        speechRecognizer = null
+                    } catch (e: Exception) {}
+                    isListening = false
+                    muteSystem()
+                }
+                "com.nova.nova_assistant.RESUME_LISTENING" -> {
+                    Log.d(TAG, "Broadcast received: RESUME_LISTENING")
+                    serviceState = ServiceState.IDLE_WAITING
+                    restartListening()
+                }
+            }
+        }
+    }
+
     private val commandTimeoutRunnable = Runnable {
         Log.d(TAG, "Timeout: No command spoken inside 4 seconds.")
         vibrate(longArrayOf(0, 80))
@@ -69,6 +95,17 @@ class WakeWordService : Service() {
         windowManager = getSystemService(Context.WINDOW_SERVICE) as WindowManager
         createNotificationChannel()
         startForegroundServiceNotification()
+        
+        val filter = android.content.IntentFilter().apply {
+            addAction("com.nova.nova_assistant.PAUSE_LISTENING")
+            addAction("com.nova.nova_assistant.RESUME_LISTENING")
+        }
+        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.TIRAMISU) {
+            registerReceiver(commandReceiver, filter, Context.RECEIVER_NOT_EXPORTED)
+        } else {
+            registerReceiver(commandReceiver, filter)
+        }
+        
         initializeRecognizer()
     }
 
@@ -92,18 +129,34 @@ class WakeWordService : Service() {
             .setPriority(NotificationCompat.PRIORITY_LOW)
             .build()
             
-        startForeground(NOTIFICATION_ID, notification)
+        try {
+            startForeground(NOTIFICATION_ID, notification)
+        } catch (e: Exception) {
+            Log.e(TAG, "Failed to start foreground service: ${e.message}")
+        }
     }
 
     private fun isWakeWord(text: String): Boolean {
-        val t = text.lowercase(Locale.getDefault())
-        return t.contains("hey nova") || 
-               t.contains("nova") ||
-               t.contains("hanoa") || 
-               t.contains("henova") || 
-               t.contains("hynova") || 
-               t.contains("he nova") || 
-               t.contains("hello nova")
+        val cleanText = text.lowercase(Locale.getDefault())
+            .replace(",", "")
+            .replace(".", "")
+            .replace("?", "")
+            .replace("!", "")
+            .trim()
+            
+        val words = cleanText.split("\\s+".toRegex())
+        if (words.isEmpty()) return false
+        
+        val firstWord = words[0]
+        val secondWord = if (words.size > 1) words[1] else ""
+        
+        val targetFirstWords = listOf("nova", "hanoa", "henova", "hynova")
+        if (targetFirstWords.contains(firstWord)) return true
+        
+        val greetingWords = listOf("hey", "hi", "hello", "ok", "okay", "he")
+        if (greetingWords.contains(firstWord) && targetFirstWords.contains(secondWord)) return true
+        
+        return false
     }
 
     private fun isCommand(text: String): Boolean {
@@ -114,25 +167,89 @@ class WakeWordService : Service() {
                t.contains("volume") || 
                t.contains("mute") || 
                t.contains("open") || 
-               t.contains("launch")
+               t.contains("launch") ||
+               t.contains("timer") ||
+               t.contains("alarm")
     }
 
     private fun cleanWakeWord(text: String): String {
-        return text.lowercase(Locale.getDefault())
-            .replace("hey nova", "")
-            .replace("hi nova", "")
-            .replace("hay nova", "")
-            .replace("hanoa", "")
-            .replace("henova", "")
-            .replace("hynova", "")
-            .replace("he nova", "")
-            .replace("hello nova", "")
+        val clean = text.lowercase(Locale.getDefault())
+            .replace(",", "")
+            .replace(".", "")
+            .replace("?", "")
+            .replace("!", "")
             .trim()
+            
+        val words = clean.split("\\s+".toRegex())
+        if (words.isEmpty()) return ""
+        
+        val firstWord = words[0]
+        val secondWord = if (words.size > 1) words[1] else ""
+        
+        val targetFirstWords = listOf("nova", "hanoa", "henova", "hynova")
+        val greetingWords = listOf("hey", "hi", "hello", "ok", "okay", "he")
+        
+        if (targetFirstWords.contains(firstWord)) {
+            return words.drop(1).joinToString(" ")
+        }
+        
+        if (greetingWords.contains(firstWord) && targetFirstWords.contains(secondWord)) {
+            return words.drop(2).joinToString(" ")
+        }
+        
+        return clean
+    }
+
+    private fun muteSystem() {
+        try {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (audioManager.ringerMode != AudioManager.RINGER_MODE_NORMAL) {
+                // If phone is in vibration or silent mode, respect it and do not modify volumes!
+                return
+            }
+            if (isMuted) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                audioManager.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, 0)
+                audioManager.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_MUTE, 0)
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.setStreamMute(AudioManager.STREAM_SYSTEM, true)
+                @Suppress("DEPRECATION")
+                audioManager.setStreamMute(AudioManager.STREAM_NOTIFICATION, true)
+            }
+            isMuted = true
+        } catch (e: Exception) {
+            Log.e(TAG, "Mute failed: ${e.message}")
+        }
+    }
+
+    private fun unmuteSystem() {
+        try {
+            val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
+            if (audioManager.ringerMode != AudioManager.RINGER_MODE_NORMAL) {
+                // If phone is in vibration or silent mode, respect it and do not modify volumes!
+                return
+            }
+            if (!isMuted) return
+            if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
+                audioManager.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_UNMUTE, 0)
+                audioManager.adjustStreamVolume(AudioManager.STREAM_NOTIFICATION, AudioManager.ADJUST_UNMUTE, 0)
+            } else {
+                @Suppress("DEPRECATION")
+                audioManager.setStreamMute(AudioManager.STREAM_SYSTEM, false)
+                @Suppress("DEPRECATION")
+                audioManager.setStreamMute(AudioManager.STREAM_NOTIFICATION, false)
+            }
+            isMuted = false
+        } catch (e: Exception) {
+            Log.e(TAG, "Unmute failed: ${e.message}")
+        }
     }
 
     private fun initializeRecognizer() {
         try {
             if (speechRecognizer != null) {
+                speechRecognizer?.setRecognitionListener(null)
                 speechRecognizer?.destroy()
                 speechRecognizer = null
             }
@@ -153,21 +270,35 @@ class WakeWordService : Service() {
             override fun onReadyForSpeech(params: Bundle?) {
                 Log.d(TAG, "onReadyForSpeech | State: $serviceState")
                 isListening = true
+                
+                // Speech session started. Delay unmute slightly to fully silence start beep
+                mainHandler.postDelayed({
+                    unmuteSystem()
+                }, 500)
             }
             override fun onBeginningOfSpeech() {
                 Log.d(TAG, "onBeginningOfSpeech")
+                if (serviceState == ServiceState.COMMAND_WAITING) {
+                    // Cancel the 4-second cutoff timer since the user has started speaking!
+                    mainHandler.removeCallbacks(commandTimeoutRunnable)
+                }
             }
             override fun onRmsChanged(rmsdB: Float) {}
             override fun onBufferReceived(buffer: ByteArray?) {}
             override fun onEndOfSpeech() {
                 Log.d(TAG, "onEndOfSpeech")
+                muteSystem() // Mute immediately to silence shutdown beep
             }
             override fun onError(error: Int) {
-                Log.d(TAG, "onError: $error")
                 isListening = false
+                muteSystem() // Mute immediately to silence error beep
                 
-                if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                if (error == SpeechRecognizer.ERROR_NO_MATCH || error == SpeechRecognizer.ERROR_SPEECH_TIMEOUT) {
+                    Log.d(TAG, "Standby status: waiting silently for wake word...")
+                } else if (error == SpeechRecognizer.ERROR_RECOGNIZER_BUSY) {
+                    Log.d(TAG, "Speech engine busy. Performing clean restart...")
                     try {
+                        speechRecognizer?.setRecognitionListener(null)
                         speechRecognizer?.destroy()
                         speechRecognizer = null
                     } catch (e: Exception) {}
@@ -176,9 +307,13 @@ class WakeWordService : Service() {
                         startRecognizer()
                     }, 2000)
                     return
+                } else {
+                    Log.d(TAG, "System voice callback: status code $error")
                 }
                 
                 if (serviceState == ServiceState.COMMAND_WAITING) {
+                    // Dismiss the assistant overlay on silence/error timeout
+                    dismissOverlay()
                     return
                 }
                 restartListening()
@@ -187,6 +322,7 @@ class WakeWordService : Service() {
                 Log.d(TAG, "onResults")
                 val matches = results?.getStringArrayList(SpeechRecognizer.RESULTS_RECOGNITION)
                 isListening = false
+                muteSystem() // Mute immediately to silence success beep
                 
                 if (matches != null && matches.isNotEmpty()) {
                     val heardText = matches.first().lowercase(Locale.getDefault()).trim()
@@ -231,6 +367,9 @@ class WakeWordService : Service() {
                 }
                 
                 if (serviceState == ServiceState.COMMAND_WAITING) {
+                    // Restart listening for the command, setting a fresh 4-second timeout
+                    mainHandler.removeCallbacks(commandTimeoutRunnable)
+                    mainHandler.postDelayed(commandTimeoutRunnable, 4000)
                     startRecognizer()
                 } else {
                     restartListening()
@@ -244,16 +383,18 @@ class WakeWordService : Service() {
                         if (isWakeWord(heardText)) {
                             Log.d(TAG, "Wake word matched in partial results! Displaying Overlay UI.")
                             
+                            speechRecognizer?.setRecognitionListener(null)
                             speechRecognizer?.cancel()
                             isListening = false
+                            muteSystem()
                             
                             vibrate(longArrayOf(0, 100, 80, 100))
                             mainHandler.post { showOverlay() }
                         }
                     } else if (serviceState == ServiceState.COMMAND_WAITING) {
                         overlayTextView?.text = heardText
+                        // Remove timeout while user is actively outputting partial words
                         mainHandler.removeCallbacks(commandTimeoutRunnable)
-                        mainHandler.postDelayed(commandTimeoutRunnable, 4000)
                     }
                 }
             }
@@ -265,6 +406,9 @@ class WakeWordService : Service() {
             putExtra(RecognizerIntent.EXTRA_LANGUAGE, Locale.getDefault())
             putExtra(RecognizerIntent.EXTRA_PARTIAL_RESULTS, true)
             putExtra("android.speech.extra.DICTATION_MODE", true)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_MINIMUM_LENGTH_MILLIS, 100000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_COMPLETE_SILENCE_LENGTH_MILLIS, 100000L)
+            putExtra(RecognizerIntent.EXTRA_SPEECH_INPUT_POSSIBLY_COMPLETE_SILENCE_LENGTH_MILLIS, 100000L)
         }
         
         startRecognizer()
@@ -277,33 +421,11 @@ class WakeWordService : Service() {
                 return
             }
             if (!isListening) {
-                speechRecognizer?.cancel()
-                
-                // Mute standard system sounds to block SpeechRecognizer beep sounds in the background
-                val audioManager = getSystemService(Context.AUDIO_SERVICE) as AudioManager
-                try {
-                    if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                        audioManager.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_MUTE, 0)
-                    } else {
-                        @Suppress("DEPRECATION")
-                        audioManager.setStreamMute(AudioManager.STREAM_SYSTEM, true)
-                    }
-                } catch (e: Exception) {}
+                // Mute system streams to suppress beep sounds
+                muteSystem()
 
                 speechRecognizer?.startListening(recognizerIntent)
                 isListening = true
-
-                // Unmute standard system sounds after 600ms (when start tone is done playing)
-                mainHandler.postDelayed({
-                    try {
-                        if (Build.VERSION.SDK_INT >= Build.VERSION_CODES.M) {
-                            audioManager.adjustStreamVolume(AudioManager.STREAM_SYSTEM, AudioManager.ADJUST_UNMUTE, 0)
-                        } else {
-                            @Suppress("DEPRECATION")
-                            audioManager.setStreamMute(AudioManager.STREAM_SYSTEM, false)
-                        }
-                    } catch (e: Exception) {}
-                }, 600)
             }
         } catch (e: Exception) {
             Log.e(TAG, "Error starting recognizer: ${e.message}")
@@ -313,10 +435,16 @@ class WakeWordService : Service() {
 
     private fun restartListening() {
         if (speechRecognizer != null) {
+            // Unbind listener before cancelling to prevent callback recursions during session transitions
+            speechRecognizer?.setRecognitionListener(null)
             speechRecognizer?.cancel()
+            
+            // Re-initialize to completely reset the native SpeechRecognizer framework bindings
+            speechRecognizer = null
+            
             mainHandler.postDelayed({
                 startRecognizer()
-            }, 600)
+            }, 1200) // Pause for 1.2s between active windows to avoid system speech service collisions
         }
     }
 
@@ -532,12 +660,93 @@ class WakeWordService : Service() {
                 false
             }
         }
+
+
+
+        if (text.contains("timer")) {
+            var seconds = 300 // default 5 minutes
+            val durationRegex = """(\d+)\s*(min|minute|sec|second)s?""".toRegex(RegexOption.IGNORE_CASE)
+            val durationMatch = durationRegex.find(text)
+            if (durationMatch != null) {
+                val value = durationMatch.groupValues[1].toInt()
+                val unit = durationMatch.groupValues[2].lowercase()
+                seconds = if (unit.startsWith("sec")) value else value * 60
+            }
+
+            val intent = Intent(android.provider.AlarmClock.ACTION_SET_TIMER).apply {
+                putExtra(android.provider.AlarmClock.EXTRA_LENGTH, seconds)
+                putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, false)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            return try {
+                startActivity(intent)
+                true
+            } catch (e: Exception) {
+                false
+            }
+        }
+
+        if (text.contains("alarm")) {
+            var hour = 8
+            var minute = 0
+            
+            // Check for relative duration, e.g. "for 5 mins", "in 10 minutes"
+            val durationRegex = """(?:in|for)?\s*(\d+)\s*(min|minute)s?""".toRegex(RegexOption.IGNORE_CASE)
+            val durationMatch = durationRegex.find(text)
+            if (durationMatch != null) {
+                val value = durationMatch.groupValues[1].toInt()
+                val calendar = java.util.Calendar.getInstance()
+                calendar.add(java.util.Calendar.MINUTE, value)
+                hour = calendar.get(java.util.Calendar.HOUR_OF_DAY)
+                minute = calendar.get(java.util.Calendar.MINUTE)
+            } else {
+                // Check for absolute time "5:30pm" or "5:30 pm"
+                val timeRegex = """(\d{1,2}):(\d{2})\s*([ap]\.?m\.?)?""".toRegex(RegexOption.IGNORE_CASE)
+                val timeMatch = timeRegex.find(text)
+                if (timeMatch != null) {
+                    hour = timeMatch.groupValues[1].toInt()
+                    minute = timeMatch.groupValues[2].toInt()
+                    val ampm = timeMatch.groupValues[3].lowercase()
+                    if (ampm.contains("p") && hour < 12) {
+                        hour += 12
+                    } else if (ampm.contains("a") && hour == 12) {
+                        hour = 0
+                    }
+                } else {
+                    // Check for hour only, e.g. "for 5 pm" or "5pm" or "at 5"
+                    val hourOnlyRegex = """(?:at|for)?\s*(\d{1,2})\s*([ap]\.?m\.?)""".toRegex(RegexOption.IGNORE_CASE)
+                    val hourMatch = hourOnlyRegex.find(text)
+                    if (hourMatch != null) {
+                        hour = hourMatch.groupValues[1].toInt()
+                        val ampm = hourMatch.groupValues[2].lowercase()
+                        if (ampm.contains("p") && hour < 12) {
+                            hour += 12
+                        } else if (ampm.contains("a") && hour == 12) {
+                            hour = 0
+                        }
+                    }
+                }
+            }
+
+            val intent = Intent(android.provider.AlarmClock.ACTION_SET_ALARM).apply {
+                putExtra(android.provider.AlarmClock.EXTRA_HOUR, hour)
+                putExtra(android.provider.AlarmClock.EXTRA_MINUTES, minute)
+                putExtra(android.provider.AlarmClock.EXTRA_SKIP_UI, false)
+                flags = Intent.FLAG_ACTIVITY_NEW_TASK
+            }
+            return try {
+                startActivity(intent)
+                true
+            } catch (e: Exception) {
+                false
+            }
+        }
         
         if (text.contains("open") || text.contains("launch")) {
             val intent = when {
                 text.contains("camera") -> Intent(android.provider.MediaStore.ACTION_IMAGE_CAPTURE)
                 text.contains("settings") -> Intent(Settings.ACTION_SETTINGS)
-                text.contains("clock") || text.contains("alarm") -> Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
+                text.contains("clock") -> Intent(android.provider.AlarmClock.ACTION_SHOW_ALARMS)
                 text.contains("calendar") -> Intent(Intent.ACTION_MAIN).addCategory(Intent.CATEGORY_APP_CALENDAR)
                 else -> null
             }
@@ -581,7 +790,12 @@ class WakeWordService : Service() {
         super.onDestroy()
         Log.d(TAG, "WakeWordService Destroyed")
         dismissOverlay()
+        unmuteSystem()
         isListening = false
+        try {
+            unregisterReceiver(commandReceiver)
+        } catch (e: Exception) {}
+        speechRecognizer?.setRecognitionListener(null)
         speechRecognizer?.destroy()
         speechRecognizer = null
     }

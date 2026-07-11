@@ -136,8 +136,7 @@ class RuleBasedProvider implements AIProvider {
     }
 
     // Default response
-    return 'I understand you said "$input". I\'m currently running in offline rule-based mode. '
-        'Once a local AI model is configured in Settings, I\'ll be able to have more natural conversations!';
+    return 'Sorry, i cannot do that in rule based engine';
   }
 
   String _getGreeting() {

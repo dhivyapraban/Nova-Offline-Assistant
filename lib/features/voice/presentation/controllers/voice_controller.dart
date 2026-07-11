@@ -7,6 +7,7 @@ import '../../domain/entities/speech_result.dart';
 import '../../domain/repositories/speech_repository.dart';
 import '../../data/datasources/speech_to_text_service.dart';
 import '../../data/repository_impl/speech_repository_impl.dart';
+import 'package:nova_assistant/core/services/tts_service.dart';
 
 /// Voice listening state
 enum VoiceStatus { idle, listening, processing }
@@ -127,6 +128,9 @@ class VoiceController extends StateNotifier<VoiceState> {
   /// Start listening for speech
   Future<void> startListening() async {
     if (!mounted) return;
+    try {
+      await TtsService.instance.stop();
+    } catch (_) {}
     state = state.copyWith(status: VoiceStatus.listening, partialText: '');
     await _repository.startListening();
   }

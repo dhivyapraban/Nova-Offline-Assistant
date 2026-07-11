@@ -17,6 +17,7 @@ class GoogleAssistantOverlay extends ConsumerStatefulWidget {
 
 class _GoogleAssistantOverlayState extends ConsumerState<GoogleAssistantOverlay> {
   bool _hasExecuted = false;
+  bool _isPopped = false;
   Timer? _silenceTimer;
 
   @override
@@ -24,9 +25,9 @@ class _GoogleAssistantOverlayState extends ConsumerState<GoogleAssistantOverlay>
     super.initState();
     // Start listening automatically as soon as the overlay opens
     Future.microtask(() async {
-      // Terminate background service to release mic lock
+      // Pause background service mic listener to release mic lock
       try {
-        await PlatformChannelService.instance.stopWakeWordService();
+        await PlatformChannelService.instance.pauseWakeWordListener();
       } catch (_) {}
       
       ref.read(voiceControllerProvider.notifier).startListening();
@@ -37,10 +38,11 @@ class _GoogleAssistantOverlayState extends ConsumerState<GoogleAssistantOverlay>
   void _startSilenceTimer() {
     _silenceTimer?.cancel();
     _silenceTimer = Timer(const Duration(seconds: 4), () {
-      if (mounted) {
+      if (mounted && !_isPopped) {
         final voiceState = ref.read(voiceControllerProvider);
         // Only close if they haven't said anything yet and are not actively speaking
         if (voiceState.recognizedText.trim().isEmpty && voiceState.displayText.trim().isEmpty) {
+          _isPopped = true;
           Navigator.pop(context);
         }
       }
@@ -50,13 +52,6 @@ class _GoogleAssistantOverlayState extends ConsumerState<GoogleAssistantOverlay>
   @override
   void dispose() {
     _silenceTimer?.cancel();
-    ref.read(voiceControllerProvider.notifier).stopListening();
-    
-    // Automatically restart background service if toggle is enabled
-    final settings = ref.read(settingsControllerProvider).valueOrNull;
-    if (settings?.wakeWordEnabled == true) {
-      PlatformChannelService.instance.startWakeWordService().catchError((_) {});
-    }
     super.dispose();
   }
 
@@ -84,7 +79,8 @@ class _GoogleAssistantOverlayState extends ConsumerState<GoogleAssistantOverlay>
           
           // Show execution feedback, then dismiss overlay panel
           Future.delayed(const Duration(milliseconds: 1500), () {
-            if (mounted) {
+            if (mounted && !_isPopped) {
+              _isPopped = true;
               Navigator.pop(context);
               ref.read(voiceControllerProvider.notifier).clearText();
             }
@@ -93,79 +89,98 @@ class _GoogleAssistantOverlayState extends ConsumerState<GoogleAssistantOverlay>
       }
     });
 
-    return ClipRRect(
-      borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-      child: BackdropFilter(
-        filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
-        child: Container(
-          decoration: BoxDecoration(
-            color: theme.brightness == Brightness.dark
-                ? const Color(0xE0121212)
-                : const Color(0xE0FFFFFF),
-            borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
-            border: Border.all(
-              color: theme.colorScheme.primary.withValues(alpha: 0.15),
-              width: 1.5,
-            ),
-          ),
-          padding: const EdgeInsets.fromLTRB(24, 16, 24, 40),
-          child: Column(
-            mainAxisSize: MainAxisSize.min,
-            children: [
-              // Top drag indicator line
-              Container(
-                width: 44,
-                height: 5,
-                decoration: BoxDecoration(
-                  color: theme.colorScheme.onSurface.withValues(alpha: 0.2),
-                  borderRadius: BorderRadius.circular(2.5),
-                ),
-              ),
-              const SizedBox(height: 24),
-
-              // Assistant status / Speech result text
-              AnimatedSize(
-                duration: const Duration(milliseconds: 250),
-                curve: Curves.easeInOut,
-                child: Text(
-                  voiceState.displayText.isEmpty
-                      ? (isListening ? "Listening..." : "How can I help?")
-                      : voiceState.displayText,
-                  style: theme.textTheme.titleLarge?.copyWith(
-                    fontWeight: FontWeight.w600,
-                    color: theme.colorScheme.onSurface,
-                  ),
-                  textAlign: TextAlign.center,
-                ),
-              ),
+    return PopScope(
+      onPopInvokedWithResult: (didPop, result) {
+        if (didPop) {
+          // Defer cleanup state changes to the next event loop tick to prevent build collisions during unmount
+          Future.microtask(() {
+            if (mounted) {
+              // Terminate listening and release microphone
+              ref.read(voiceControllerProvider.notifier).stopListening();
               
-              const SizedBox(height: 36),
-
-              // Google Assistant style glowing colored dots
-              if (isListening)
-                Row(
-                  mainAxisAlignment: MainAxisAlignment.center,
-                  children: [
-                    _pulseDot(const Color(0xFF4285F4), 0),
-                    _pulseDot(const Color(0xFFEA4335), 1),
-                    _pulseDot(const Color(0xFFFBBC05), 2),
-                    _pulseDot(const Color(0xFF34A853), 3),
-                  ],
-                )
-              else
+              // Resume background wake-word listening service
+              final settings = ref.read(settingsControllerProvider).valueOrNull;
+              if (settings?.wakeWordEnabled == true) {
+                PlatformChannelService.instance.resumeWakeWordListener().catchError((_) {});
+              }
+            }
+          });
+        }
+      },
+      child: ClipRRect(
+        borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+        child: BackdropFilter(
+          filter: ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+          child: Container(
+            decoration: BoxDecoration(
+              color: theme.brightness == Brightness.dark
+                  ? const Color(0xE0121212)
+                  : const Color(0xE0FFFFFF),
+              borderRadius: const BorderRadius.vertical(top: Radius.circular(28)),
+              border: Border.all(
+                color: theme.colorScheme.primary.withValues(alpha: 0.15),
+                width: 1.5,
+              ),
+            ),
+            padding: const EdgeInsets.fromLTRB(24, 16, 24, 40),
+            child: Column(
+              mainAxisSize: MainAxisSize.min,
+              children: [
+                // Top drag indicator line
                 Container(
-                  padding: const EdgeInsets.all(12),
+                  width: 44,
+                  height: 5,
                   decoration: BoxDecoration(
-                    shape: BoxShape.circle,
-                    color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                    color: theme.colorScheme.onSurface.withValues(alpha: 0.2),
+                    borderRadius: BorderRadius.circular(2.5),
                   ),
-                  child: Icon(
-                    Icons.mic_rounded,
-                    size: 32,
-                    color: theme.colorScheme.primary,
+                ),
+                const SizedBox(height: 24),
+  
+                // Assistant status / Speech result text
+                AnimatedSize(
+                  duration: const Duration(milliseconds: 250),
+                  curve: Curves.easeInOut,
+                  child: Text(
+                    voiceState.displayText.isEmpty
+                        ? (isListening ? "Listening..." : "How can I help?")
+                        : voiceState.displayText,
+                    style: theme.textTheme.titleLarge?.copyWith(
+                      fontWeight: FontWeight.w600,
+                      color: theme.colorScheme.onSurface,
+                    ),
+                    textAlign: TextAlign.center,
                   ),
-                ).animate().scale(duration: 400.ms, curve: Curves.elasticOut),
-            ],
+                ),
+                
+                const SizedBox(height: 36),
+  
+                // Google Assistant style glowing colored dots
+                if (isListening)
+                  Row(
+                    mainAxisAlignment: MainAxisAlignment.center,
+                    children: [
+                      _pulseDot(const Color(0xFF4285F4), 0),
+                      _pulseDot(const Color(0xFFEA4335), 1),
+                      _pulseDot(const Color(0xFFFBBC05), 2),
+                      _pulseDot(const Color(0xFF34A853), 3),
+                    ],
+                  )
+                else
+                  Container(
+                    padding: const EdgeInsets.all(12),
+                    decoration: BoxDecoration(
+                      shape: BoxShape.circle,
+                      color: theme.colorScheme.primary.withValues(alpha: 0.1),
+                    ),
+                    child: Icon(
+                      Icons.mic_rounded,
+                      size: 32,
+                      color: theme.colorScheme.primary,
+                    ),
+                  ).animate().scale(duration: 400.ms, curve: Curves.elasticOut),
+              ],
+            ),
           ),
         ),
       ),

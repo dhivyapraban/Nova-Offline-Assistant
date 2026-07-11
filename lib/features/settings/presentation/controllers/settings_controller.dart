@@ -29,8 +29,11 @@ class SettingsController extends StateNotifier<AsyncValue<AppSettings>> {
       state = AsyncValue.data(settings);
       
       // Auto-start native background listener on startup if enabled
+      // Delay slightly to ensure the activity has gained window focus and is fully in the foreground
       if (settings.wakeWordEnabled) {
-        PlatformChannelService.instance.startWakeWordService().catchError((_) {});
+        Future.delayed(const Duration(seconds: 2), () {
+          PlatformChannelService.instance.startWakeWordService().catchError((_) {});
+        });
       }
     } catch (e, st) {
       state = AsyncValue.error(e, st);

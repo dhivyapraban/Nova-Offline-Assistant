@@ -151,13 +151,7 @@ class PlatformChannelService {
     }
   }
 
-  Future<void> openStopwatch() async {
-    try {
-      await _channel.invokeMethod('openStopwatch');
-    } on PlatformException catch (e) {
-      throw Exception('Cannot open stopwatch: ${e.message}');
-    }
-  }
+
 
   Future<void> openNotes({String? text}) async {
     try {
@@ -228,6 +222,22 @@ class PlatformChannelService {
       await _channel.invokeMethod('stopWakeWordService');
     } on PlatformException catch (e) {
       throw Exception('Cannot stop wake word service: ${e.message}');
+    }
+  }
+
+  Future<void> pauseWakeWordListener() async {
+    try {
+      await _channel.invokeMethod('pauseWakeWordListener');
+    } on PlatformException catch (e) {
+      throw Exception('Cannot pause wake word listener: ${e.message}');
+    }
+  }
+
+  Future<void> resumeWakeWordListener() async {
+    try {
+      await _channel.invokeMethod('resumeWakeWordListener');
+    } on PlatformException catch (e) {
+      throw Exception('Cannot resume wake word listener: ${e.message}');
     }
   }
 

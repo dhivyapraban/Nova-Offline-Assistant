@@ -4,7 +4,7 @@ import '../../domain/entities/intent.dart';
 class IntentParser {
   static final Map<IntentType, List<String>> _intentKeywords = {
     IntentType.createNote: ['note', 'write', 'jot', 'memo'],
-    IntentType.setTimer: ['timer', 'countdown', 'stopwatch'],
+    IntentType.setTimer: ['timer', 'countdown'],
     IntentType.setAlarm: ['alarm', 'wake me', 'wake up'],
     IntentType.setReminder: ['remind', 'reminder', 'don\'t forget'],
     IntentType.addTodo: ['todo', 'task', 'to do', 'to-do', 'checklist'],
@@ -144,30 +144,34 @@ class IntentParser {
     }
 
     if (intent == IntentType.setAlarm) {
-      final timeMatch = RegExp(r'(\d{1,2}):(\d{2})').firstMatch(input);
-      if (timeMatch != null) {
-        int hour = int.parse(timeMatch.group(1)!);
-        int minute = int.parse(timeMatch.group(2)!);
+      // 1. Check for relative duration offsets, e.g., "for 5 mins", "in 10 minutes", "in 1 hour"
+      final durationMatch = RegExp(
+        r'(?:in|for)?\s*(\d+)\s*(min|minute|hr|hour)s?',
+        caseSensitive: false,
+      ).firstMatch(input);
+
+      if (durationMatch != null) {
+        final value = int.parse(durationMatch.group(1)!);
+        final unit = durationMatch.group(2)!.toLowerCase();
         
-        final hasPm = RegExp(r'\bp\.?m\.?\b').hasMatch(input);
-        final hasAm = RegExp(r'\ba\.?m\.?\b').hasMatch(input);
-        
-        if (hasPm && hour < 12) {
-          hour += 12;
-        } else if (hasAm && hour == 12) {
-          hour = 0;
+        DateTime targetTime = DateTime.now();
+        if (unit.startsWith('min')) {
+          targetTime = targetTime.add(Duration(minutes: value));
+        } else if (unit.startsWith('hr') || unit.startsWith('hour')) {
+          targetTime = targetTime.add(Duration(hours: value));
         }
         
-        params['hour'] = hour;
-        params['minute'] = minute;
+        params['hour'] = targetTime.hour;
+        params['minute'] = targetTime.minute;
       } else {
-        final hourMatch = RegExp(r'\b(at|for)?\s*(\d{1,2})\s*([ap]\.?m\.?)?\b').firstMatch(input);
-        if (hourMatch != null) {
-          int hour = int.parse(hourMatch.group(2)!);
-          final ampm = hourMatch.group(3);
+        // 2. Fall back to absolute time parsing, e.g., "5:30 pm", "5:30pm", "at 5"
+        final timeMatch = RegExp(r'(\d{1,2}):(\d{2})').firstMatch(input);
+        if (timeMatch != null) {
+          int hour = int.parse(timeMatch.group(1)!);
+          int minute = int.parse(timeMatch.group(2)!);
           
-          final hasPm = ampm != null && RegExp(r'p\.?m\.?').hasMatch(ampm);
-          final hasAm = ampm != null && RegExp(r'a\.?m\.?').hasMatch(ampm);
+          final hasPm = RegExp(r'p\.?m\.?', caseSensitive: false).hasMatch(input);
+          final hasAm = RegExp(r'a\.?m\.?', caseSensitive: false).hasMatch(input);
           
           if (hasPm && hour < 12) {
             hour += 12;
@@ -176,7 +180,26 @@ class IntentParser {
           }
           
           params['hour'] = hour;
-          params['minute'] = 0;
+          params['minute'] = minute;
+        } else {
+          // e.g. "at 5", "for 5", "5 am", "5pm"
+          final hourMatch = RegExp(r'(?:at|for)?\s*(\d{1,2})\s*([ap]\.?m\.?)?', caseSensitive: false).firstMatch(input);
+          if (hourMatch != null) {
+            int hour = int.parse(hourMatch.group(1)!);
+            final ampm = hourMatch.group(2);
+            
+            final hasPm = ampm != null && RegExp(r'p\.?m\.?', caseSensitive: false).hasMatch(ampm);
+            final hasAm = ampm != null && RegExp(r'a\.?m\.?', caseSensitive: false).hasMatch(ampm);
+            
+            if (hasPm && hour < 12) {
+              hour += 12;
+            } else if (hasAm && hour == 12) {
+              hour = 0;
+            }
+            
+            params['hour'] = hour;
+            params['minute'] = 0;
+          }
         }
       }
     }

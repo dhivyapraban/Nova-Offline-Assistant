@@ -13,6 +13,7 @@ import '../../../ai_engine/presentation/controllers/ai_engine_controller.dart';
 import '../../../../core/services/platform_channel_service.dart';
 import '../../../launcher/domain/entities/installed_app.dart';
 import '../../../launcher/presentation/pages/app_launcher_page.dart';
+import '../../../../core/services/tts_service.dart';
 
 // Global callback to execute page navigation without circular dependencies
 void Function(String)? onAssistantNavigate;
@@ -80,13 +81,6 @@ class ConversationController extends StateNotifier<ConversationState> {
 
   Future<void> _executeIntentAction(Intent intent, String rawText) async {
     if (intent.type == IntentType.setTimer) {
-      if (rawText.toLowerCase().contains('stopwatch')) {
-        try {
-          await PlatformChannelService.instance.openStopwatch();
-        } catch (_) {}
-        return;
-      }
-
       int seconds = 300; // default 5 minutes
       final actionData = intent.parameters;
       final val = actionData['duration_value'] ?? actionData['number'];
@@ -262,6 +256,9 @@ class ConversationController extends StateNotifier<ConversationState> {
       );
 
       await _repository.addMessage(assistantMessage);
+      
+      // Speak the assistant's reply
+      TtsService.instance.speak(assistantMessage.content).catchError((_) {});
     } catch (e) {
       final errorMessage = ConversationMessage(
         id: _uuid.v4(),
@@ -273,6 +270,9 @@ class ConversationController extends StateNotifier<ConversationState> {
         messages: [...state.messages, errorMessage],
         isProcessing: false,
       );
+      
+      // Speak the error reply
+      TtsService.instance.speak(errorMessage.content).catchError((_) {});
     }
   }
 

@@ -5,17 +5,17 @@ class NovaColors {
   NovaColors._();
 
   // === Primary Palette ===
-  static const Color primary = Color(0xFF00FF88);
-  static const Color primaryLight = Color(0xFF00C96A);
-  static const Color primaryDark = Color(0xFF00FF88);
+  static const Color primary = Color(0xFFFF3B30);
+  static const Color primaryLight = Color(0xFFD32F2F);
+  static const Color primaryDark = Color(0xFFFF453A);
 
   // === Secondary Palette ===
-  static const Color secondary = Color(0xFF00E5FF);
-  static const Color secondaryLight = Color(0xFF00B8D4);
-  static const Color secondaryDark = Color(0xFF00E5FF);
+  static const Color secondary = Color(0xFFFF9F0A);
+  static const Color secondaryLight = Color(0xFFF57C00);
+  static const Color secondaryDark = Color(0xFFFC3D39);
 
   // === Accent (from logo — Nova Red) ===
-  static const Color accent = Color(0xFFFF1744);
+  static const Color accent = Color(0xFFFF3B30);
 
   // === Dark Mode ===
   static const Color darkBackground = Color(0xFF0A0A0A);
@@ -61,7 +61,7 @@ class NovaColors {
 
   // === Gradient Presets ===
   static const LinearGradient primaryGradient = LinearGradient(
-    colors: [Color(0xFF00FF88), Color(0xFF00E5FF)],
+    colors: [Color(0xFFFF3B30), Color(0xFFFF9F0A)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
@@ -73,7 +73,7 @@ class NovaColors {
   );
 
   static const LinearGradient accentGradient = LinearGradient(
-    colors: [Color(0xFFFF1744), Color(0xFFFF6D00)],
+    colors: [Color(0xFFFF3B30), Color(0xFFFF9F0A)],
     begin: Alignment.topLeft,
     end: Alignment.bottomRight,
   );
