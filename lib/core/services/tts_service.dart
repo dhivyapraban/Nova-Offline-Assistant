@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter_tts/flutter_tts.dart';
 
 class TtsService {
@@ -10,6 +11,7 @@ class TtsService {
   Future<void> init() async {
     if (_isInitialized) return;
     try {
+      await _flutterTts.awaitSpeakCompletion(true);
       await _flutterTts.setLanguage("en-US");
       await _flutterTts.setSpeechRate(0.5); // natural reading speed
       await _flutterTts.setVolume(1.0);
@@ -20,14 +22,41 @@ class TtsService {
     }
   }
 
-  Future<void> speak(String text) async {
+  Future<void> speak(String text, {bool awaitCompletion = false}) async {
     await init();
     try {
       final cleanText = text.trim();
       if (cleanText.isEmpty) return;
-      
+
       await _flutterTts.stop();
-      await _flutterTts.speak(cleanText);
+
+      if (awaitCompletion) {
+        final completer = Completer<void>();
+        _flutterTts.setCompletionHandler(() {
+          if (!completer.isCompleted) completer.complete();
+        });
+        _flutterTts.setErrorHandler((_) {
+          if (!completer.isCompleted) completer.complete();
+        });
+        _flutterTts.setCancelHandler(() {
+          if (!completer.isCompleted) completer.complete();
+        });
+
+        await _flutterTts.speak(cleanText);
+
+        // Dynamic safety timeout: estimate ~450ms per word + 1.5s padding
+        final wordCount = cleanText.split(' ').length;
+        final expectedDurationMs = (wordCount * 450) + 1500;
+
+        await completer.future.timeout(
+          Duration(milliseconds: expectedDurationMs),
+          onTimeout: () {
+            if (!completer.isCompleted) completer.complete();
+          },
+        );
+      } else {
+        await _flutterTts.speak(cleanText);
+      }
     } catch (e) {
       // ignore speaking errors
     }

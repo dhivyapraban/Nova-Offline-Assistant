@@ -24,12 +24,12 @@ final conversationRepositoryProvider = Provider<ConversationRepository>((ref) {
 
 final conversationControllerProvider =
     StateNotifierProvider<ConversationController, ConversationState>((ref) {
-  return ConversationController(
-    ref.read(conversationRepositoryProvider),
-    ref.read(aiRepositoryProvider),
-    ref,
-  );
-});
+      return ConversationController(
+        ref.read(conversationRepositoryProvider),
+        ref.read(aiRepositoryProvider),
+        ref,
+      );
+    });
 
 class ConversationState {
   final List<ConversationMessage> messages;
@@ -66,7 +66,7 @@ class ConversationController extends StateNotifier<ConversationState> {
   static const _uuid = Uuid();
 
   ConversationController(this._repository, this._aiRepository, this._ref)
-      : super(const ConversationState(isLoading: true)) {
+    : super(const ConversationState(isLoading: true)) {
     _loadHistory();
   }
 
@@ -109,13 +109,16 @@ class ConversationController extends StateNotifier<ConversationState> {
           final launcherState = _ref.read(launcherControllerProvider);
           final lowerName = appName.toLowerCase();
           final matchedApp = launcherState.apps.firstWhere(
-            (app) => app.appName.toLowerCase().contains(lowerName) ||
-                     app.packageName.toLowerCase().contains(lowerName),
+            (app) =>
+                app.appName.toLowerCase().contains(lowerName) ||
+                app.packageName.toLowerCase().contains(lowerName),
             orElse: () => const InstalledApp(packageName: '', appName: ''),
           );
 
           if (matchedApp.packageName.isNotEmpty) {
-            await _ref.read(launcherControllerProvider.notifier).launchApp(matchedApp.packageName);
+            await _ref
+                .read(launcherControllerProvider.notifier)
+                .launchApp(matchedApp.packageName);
           }
         } catch (_) {}
       }
@@ -191,7 +194,8 @@ class ConversationController extends StateNotifier<ConversationState> {
             ...state.messages,
             ConversationMessage(
               id: DateTime.now().millisecondsSinceEpoch.toString(),
-              content: 'Could not lock phone: $errorMsg. Please ensure you clicked "Activate" on the settings screen that opened.',
+              content:
+                  'Could not lock phone: $errorMsg. Please ensure you clicked "Activate" on the settings screen that opened.',
               role: 'assistant',
               createdAt: DateTime.now(),
             ),
@@ -233,9 +237,14 @@ class ConversationController extends StateNotifier<ConversationState> {
     await _repository.addMessage(userMessage);
 
     // 1. Parse intent immediately and execute action (non-blocking, instant feedback)
+    Intent? deferredIntent;
     try {
       final intent = await _aiRepository.parseIntent(text.trim());
-      _executeIntentAction(intent, text.trim());
+      if (intent.type == IntentType.makeCall) {
+        deferredIntent = intent;
+      } else {
+        _executeIntentAction(intent, text.trim());
+      }
     } catch (_) {}
 
     // 2. Query the LLM for natural text generation
@@ -256,9 +265,16 @@ class ConversationController extends StateNotifier<ConversationState> {
       );
 
       await _repository.addMessage(assistantMessage);
-      
+
       // Speak the assistant's reply
-      TtsService.instance.speak(assistantMessage.content).catchError((_) {});
+      await TtsService.instance.speak(
+        assistantMessage.content,
+        awaitCompletion: deferredIntent != null,
+      );
+
+      if (deferredIntent != null) {
+        await _executeIntentAction(deferredIntent, text.trim());
+      }
     } catch (e) {
       final errorMessage = ConversationMessage(
         id: _uuid.v4(),
@@ -270,9 +286,16 @@ class ConversationController extends StateNotifier<ConversationState> {
         messages: [...state.messages, errorMessage],
         isProcessing: false,
       );
-      
+
       // Speak the error reply
-      TtsService.instance.speak(errorMessage.content).catchError((_) {});
+      await TtsService.instance.speak(
+        errorMessage.content,
+        awaitCompletion: deferredIntent != null,
+      );
+
+      if (deferredIntent != null) {
+        await _executeIntentAction(deferredIntent, text.trim());
+      }
     }
   }
 
